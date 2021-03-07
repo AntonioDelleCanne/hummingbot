@@ -24,3 +24,5 @@ cdef class ExchangeBase(ConnectorBase):
     cdef ClientOrderBookQueryResult c_get_price_for_volume(self, str trading_pair, bint is_buy, object volume)
     cdef object c_get_fee(self, str base_currency, str quote_currency, object order_type, object order_side,
                           object amount, object price)
+    
+    cdef bool c_withdrawal(self, str asset, str address, object amount)

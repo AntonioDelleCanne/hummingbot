@@ -1138,3 +1138,95 @@ cdef class BinanceExchange(ExchangeBase):
             time = get_utc_timestamp(days_ago) * 1e3
             trades = [t for t in trades if t.timestamp > time]
         return trades
+
+    "Under development"
+
+    async def execute_buy(self,
+                          order_id: str,
+                          trading_pair: str,
+                          amount: Decimal,
+                          order_type: OrderType,
+                          price: Optional[Decimal] = s_decimal_NaN):
+        return await self.create_order(TradeType.BUY, order_id, trading_pair, amount, order_type, price)
+
+    cdef str c_buy(self, str trading_pair, object amount, object order_type=OrderType.LIMIT, object price=s_decimal_NaN,
+                   dict kwargs={}):
+        cdef:
+            str order_id = get_client_order_id("buy", trading_pair)
+        safe_ensure_future(self.execute_buy(order_id, trading_pair, amount, order_type, price))
+        return order_id
+
+    async def create_order(self,
+                           trade_type: TradeType,
+                           order_id: str,
+                           trading_pair: str,
+                           amount: Decimal,
+                           order_type: OrderType,
+                           price: Optional[Decimal] = Decimal("NaN")):
+        cdef:
+            TradingRule trading_rule = self._trading_rules[trading_pair]
+        amount = self.c_quantize_order_amount(trading_pair, amount)
+        price = self.c_quantize_order_price(trading_pair, price)
+        if amount < trading_rule.min_order_size:
+            raise ValueError(f"Buy order amount {amount} is lower than the minimum order size "
+                             f"{trading_rule.min_order_size}.")
+        order_result = None
+        amount_str = f"{amount:f}"
+        price_str = f"{price:f}"
+        type_str = BinanceExchange.binance_order_type(order_type)
+        side_str = BinanceClient.SIDE_BUY if trade_type is TradeType.BUY else BinanceClient.SIDE_SELL
+        api_params = {"symbol": convert_to_exchange_trading_pair(trading_pair),
+                      "side": side_str,
+                      "quantity": amount_str,
+                      "type": type_str,
+                      "newClientOrderId": order_id,
+                      "price": price_str}
+        if order_type == OrderType.LIMIT:
+            api_params["timeInForce"] = BinanceClient.TIME_IN_FORCE_GTC
+        self.c_start_tracking_order(order_id,
+                                    "",
+                                    trading_pair,
+                                    trade_type,
+                                    price,
+                                    amount,
+                                    order_type
+                                    )
+        try:
+            order_result = await self.query_api(self._binance_client.create_order, **api_params)
+            exchange_order_id = str(order_result["orderId"])
+            tracked_order = self._in_flight_orders.get(order_id)
+            if tracked_order is not None:
+                self.logger().info(f"Created {type_str} {side_str} order {order_id} for "
+                                   f"{amount} {trading_pair}.")
+                tracked_order.exchange_order_id = exchange_order_id
+
+            event_tag = self.MARKET_BUY_ORDER_CREATED_EVENT_TAG if trade_type is TradeType.BUY \
+                else self.MARKET_SELL_ORDER_CREATED_EVENT_TAG
+            event_class = BuyOrderCreatedEvent if trade_type is TradeType.BUY else SellOrderCreatedEvent
+            self.c_trigger_event(event_tag,
+                                 event_class(
+                                     self._current_timestamp,
+                                     order_type,
+                                     trading_pair,
+                                     amount,
+                                     price,
+                                     order_id,
+                                     exchange_order_id
+                                 ))
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            self.c_stop_tracking_order(order_id)
+            self.logger().network(
+                f"Error submitting {side_str} {type_str} order to Binance for "
+                f"{amount} {trading_pair} "
+                f"{price}.",
+                exc_info=True,
+                app_warning_msg=str(e)
+            )
+            self.c_trigger_event(self.MARKET_ORDER_FAILURE_EVENT_TAG,
+                                 MarketOrderFailureEvent(self._current_timestamp, order_id, order_type))
+
+    "Under development"
+
+    

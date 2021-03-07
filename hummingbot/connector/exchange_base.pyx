@@ -290,3 +290,19 @@ cdef class ExchangeBase(ConnectorBase):
         required volume.
         """
         return Decimal(str(self.get_price_for_volume(trading_pair, is_buy, amount).result_price))
+
+    "Under development"
+
+    def withdrawal(self, asset: str, address: str, amount: Decimal) -> bool:
+        """
+        Withdraws the specified amount into the wallet.
+        Params:
+        asset: the asset to withdraw
+        address: the address of the wallet
+        amount: the amount to be withdrawn
+        Returns true if the withdraw succeded, false otherwise.
+        """
+        raise NotImplementedError
+
+    cdef c_withdrawal(self, str asset, str address, object amount) -> bool:
+        return self.withdrawal(asset, address ,amount)

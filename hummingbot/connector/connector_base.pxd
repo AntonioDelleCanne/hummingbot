@@ -26,3 +26,5 @@ cdef class ConnectorBase(NetworkIterator):
     cdef object c_get_order_size_quantum(self, str trading_pair, object order_size)
     cdef object c_quantize_order_price(self, str trading_pair, object price)
     cdef object c_quantize_order_amount(self, str trading_pair, object amount, object price=*)
+
+    cdef bool c_withdrawal(self, str asset, str address, object amount)
