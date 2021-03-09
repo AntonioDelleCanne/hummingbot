@@ -234,7 +234,7 @@ class BinanceExchangeUnitTest(unittest.TestCase):
         self.assertAlmostEqual(Decimal("0.005"), maker_fee.percent)
 
     def test_withdraw(self):
-        self.market.c_withdrawal("ETH","",0.001)
+        self.market.c_withdrawal("ETH","",0.001,"")
 
     def test_buy_and_sell(self):
         self.assertGreater(self.market.get_balance("ETH"), Decimal("0.05"))

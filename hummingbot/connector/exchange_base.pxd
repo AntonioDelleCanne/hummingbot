@@ -25,4 +25,4 @@ cdef class ExchangeBase(ConnectorBase):
     cdef object c_get_fee(self, str base_currency, str quote_currency, object order_type, object order_side,
                           object amount, object price)
     
-    cdef bool c_withdrawal(self, str asset, str address, object amount, str address_tag)
+    cdef int c_withdrawal(self, str asset, str address, object amount, str address_tag)

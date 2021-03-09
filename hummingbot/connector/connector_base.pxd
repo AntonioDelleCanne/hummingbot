@@ -27,4 +27,4 @@ cdef class ConnectorBase(NetworkIterator):
     cdef object c_quantize_order_price(self, str trading_pair, object price)
     cdef object c_quantize_order_amount(self, str trading_pair, object amount, object price=*)
 
-    cdef bool c_withdrawal(self, str asset, str address, object amount, str address_tag)
+    cdef int c_withdrawal(self, str asset, str address, object amount, str address_tag)

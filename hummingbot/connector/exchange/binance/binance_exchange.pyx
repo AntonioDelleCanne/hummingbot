@@ -1198,6 +1198,6 @@ cdef class BinanceExchange(ExchangeBase):
             # self.c_trigger_event(self.MARKET_ORDER_FAILURE_EVENT_TAG,
             #                      MarketOrderFailureEvent(self._current_timestamp, order_id, order_type))
 
-    cdef bool c_withdrawal(self, str asset, str address, object amount, str address_tag = None):
+    cdef int c_withdrawal(self, str asset, str address, object amount, str address_tag):
         safe_ensure_future(self.execute_withdrawal(asset, address, amount, address_tag))
-        return True
+        return 1

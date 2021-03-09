@@ -293,7 +293,7 @@ cdef class ExchangeBase(ConnectorBase):
 
     "Under development"
 
-    def withdrawal(self, asset: str, address: str, amount: Decimal) -> bool:
+    def withdrawal(self, asset: str, address: str, amount: Decimal, address_tag: str) -> int:
         """
         Withdraws the specified amount into the wallet.
         Params:
@@ -304,5 +304,5 @@ cdef class ExchangeBase(ConnectorBase):
         """
         raise NotImplementedError
 
-    cdef c_withdrawal(self, str asset, str address, object amount) -> bool:
-        return self.withdrawal(asset, address ,amount)
+    cdef int c_withdrawal(self, str asset, str address, object amount, str address_tag):
+        return self.withdrawal(asset, address ,amount, address_tag)
