@@ -233,6 +233,9 @@ class BinanceExchangeUnitTest(unittest.TestCase):
                                                   Decimal('0.1'))
         self.assertAlmostEqual(Decimal("0.005"), maker_fee.percent)
 
+    def test_withdraw(self):
+        self.market.c_withdrawal("ETH","",0.001)
+
     def test_buy_and_sell(self):
         self.assertGreater(self.market.get_balance("ETH"), Decimal("0.05"))
         bid_price: Decimal = self.market.get_price("LINK-ETH", True)

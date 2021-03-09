@@ -440,7 +440,7 @@ cdef class ConnectorBase(NetworkIterator):
 
     "Under development"
 
-    def withdrawal(self, asset: str, address: str, amount: Decimal) -> bool:
+    def withdrawal(self, asset: str, address: str, amount: Decimal, address_tag: str) -> bool:
         """
         Withdraws the specified amount into the wallet.
         Params:
@@ -451,5 +451,5 @@ cdef class ConnectorBase(NetworkIterator):
         """
         raise NotImplementedError
 
-    cdef c_withdrawal(self, str asset, str address, object amount) -> bool:
+    cdef c_withdrawal(self, str asset, str address, object amount, str address_tag = None) -> bool:
         return self.withdrawal(asset, address ,amount)
