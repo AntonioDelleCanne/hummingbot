@@ -25,8 +25,9 @@ class BinanceOrderBookTrackerUnitTest(unittest.TestCase):
 
     def test_user_stream(self):
         # Wait process some msgs.
-        self.ev_loop.run_until_complete(asyncio.sleep(120.0))
-        print(self.user_stream_tracker.user_stream)
+        while 1:
+            self.ev_loop.run_until_complete(asyncio.sleep(5.0))
+            print(self.user_stream_tracker.user_stream)
 
 
 def main():

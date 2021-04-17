@@ -26,3 +26,4 @@ cdef class ExchangeBase(ConnectorBase):
                           object amount, object price)
     
     cdef int c_withdrawal(self, str asset, str address, object amount, str address_tag)
+    cdef dict get_deposit_address(self, str asset)

@@ -32,7 +32,8 @@ from hummingbot.core.event.events import (
     MarketOrderFailureEvent,
     OrderType,
     TradeType,
-    TradeFee
+    TradeFee,
+    TransferEvent
 )
 from hummingbot.core.network_iterator import NetworkStatus
 from hummingbot.core.utils.async_call_scheduler import AsyncCallScheduler
@@ -84,6 +85,10 @@ cdef class KucoinExchange(ExchangeBase):
     MARKET_ORDER_FILLED_EVENT_TAG = MarketEvent.OrderFilled.value
     MARKET_BUY_ORDER_CREATED_EVENT_TAG = MarketEvent.BuyOrderCreated.value
     MARKET_SELL_ORDER_CREATED_EVENT_TAG = MarketEvent.SellOrderCreated.value
+    # Developing
+    MARKET_WITHDRAW_EVENT_TAG = MarketEvent.Withdraw.value
+    MARKET_DEPOSIT_EVENT_TAG = MarketEvent.Deposit.value
+
     API_CALL_TIMEOUT = 10.0
     UPDATE_ORDERS_INTERVAL = 10.0
     SHORT_POLL_INTERVAL = 5.0
@@ -293,6 +298,27 @@ cdef class KucoinExchange(ExchangeBase):
                     total_balance = Decimal(execution_data["total"])
                     self._account_balances.update({currency: total_balance})
                     self._account_available_balances.update({currency: available_balance})
+                    
+                    self.logger().info("Kucoin")
+                    self.logger().info(f"Currency: {currency}, available_balance: {available_balance}, time: execution_data['time']")
+                    if (execution_data["relationEvent"] == "main.deposit"):
+                        # In this case it means that it received the balance
+                        self.logger().info("Balance received, triggering event transfer deposit")
+                        self.c_trigger_event(self.MARKET_DEPOSIT_EVENT_TAG,
+                                                TransferEvent(long(execution_data["time"]), currency, float(execution_data["available"])))   
+
+                    elif (execution_data["relationEvent"] == "main.withdraw_done"):
+                        # The balance was withdrawn
+                        self.logger().info("Withdraw done\nBalance given, triggering event transfer withdraw")
+                        self.c_trigger_event(self.MARKET_WITHDRAW_EVENT_TAG,
+                                                TransferEvent(long(execution_data["time"]), currency, float(execution_data["available"])))
+
+                    elif (execution_data["relationEvent"] == "main.withdraw_hold"):
+                        # The balance was withdrawn
+                        self.logger().info("Withdraw hold\nBalance given, triggering event transfer withdraw")
+                        self.c_trigger_event(self.MARKET_WITHDRAW_EVENT_TAG,
+                                                TransferEvent(long(execution_data["time"]), currency, float(execution_data["available"])))
+
                     continue
                 else:
                     continue
@@ -955,3 +981,7 @@ cdef class KucoinExchange(ExchangeBase):
 
     def get_order_book(self, trading_pair: str) -> OrderBook:
         return self.c_get_order_book(trading_pair)
+
+    # TODO withdraw
+
+    # TODO get_deposit_address

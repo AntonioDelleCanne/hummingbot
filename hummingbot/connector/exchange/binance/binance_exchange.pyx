@@ -49,7 +49,8 @@ from hummingbot.core.event.events import (
     MarketOrderFailureEvent,
     OrderType,
     TradeType,
-    TradeFee
+    TradeFee,
+    TransferEvent
 )
 from hummingbot.connector.exchange_base import ExchangeBase
 from hummingbot.core.network_iterator import NetworkStatus
@@ -106,6 +107,9 @@ cdef class BinanceExchange(ExchangeBase):
     MARKET_ORDER_FILLED_EVENT_TAG = MarketEvent.OrderFilled.value
     MARKET_BUY_ORDER_CREATED_EVENT_TAG = MarketEvent.BuyOrderCreated.value
     MARKET_SELL_ORDER_CREATED_EVENT_TAG = MarketEvent.SellOrderCreated.value
+    # Developing
+    MARKET_WITHDRAW_EVENT_TAG = MarketEvent.Withdraw.value
+    MARKET_DEPOSIT_EVENT_TAG = MarketEvent.Deposit.value
 
     API_CALL_TIMEOUT = 10.0
     SHORT_POLL_INTERVAL = 5.0
@@ -627,10 +631,36 @@ cdef class BinanceExchange(ExchangeBase):
 
     async def _user_stream_event_listener(self):
         async for event_message in self._iter_user_event_queue():
+            self.logger().info("Entrato")
             try:
                 event_type = event_message.get("e")
                 # Refer to https://github.com/binance-exchange/binance-official-api-docs/blob/master/user-data-stream.md
                 # As per the order update section in Binance the ID of the order being cancelled is under the "C" key
+
+                # Under development
+
+                if event_type == "balanceUpdate":
+                    event_time = long(event_message.get("E"))
+                    asset = event_message.get("a")
+                    balance_delta = float(event_message.get("d"))
+                    clear_time = long(event_message.get("T"))
+                    time_passed = event_time - clear_time
+                    self.logger().info(f"Event time: {event_time}\nAsset: {asset}")
+                    self.logger().info(f"Balance delta: {balance_delta}\nClear time: {clear_time}")
+                    self.logger().info(f"Seconds passed: {time_passed}")
+
+                    if (balance_delta >= 0):
+                        # In this case it means that it received the balance
+                        self.logger().info("Balance received, triggering event transfer deposit")
+                        self.c_trigger_event(self.MARKET_DEPOSIT_EVENT_TAG,
+                                                TransferEvent(clear_time, asset, balance_delta))   
+
+                    else:
+                        # The balance was withdrawn
+                        self.logger().info("Balance given, triggering event transfer withdraw")
+                        self.c_trigger_event(self.MARKET_WITHDRAW_EVENT_TAG,
+                                                TransferEvent(clear_time, asset, balance_delta))
+
                 if event_type == "executionReport":
                     execution_type = event_message.get("x")
                     if execution_type != "CANCELED":
@@ -794,11 +824,13 @@ cdef class BinanceExchange(ExchangeBase):
         self._order_book_tracker.start()
         self._trading_rules_polling_task = safe_ensure_future(self._trading_rules_polling_loop())
         if self._trading_required:
+            self.logger().info("Start network")
             self._status_polling_task = safe_ensure_future(self._status_polling_loop())
             self._user_stream_tracker_task = safe_ensure_future(self._user_stream_tracker.start())
             self._user_stream_event_listener_task = safe_ensure_future(self._user_stream_event_listener())
 
     def _stop_network(self):
+        self.logger().info("Stop network")
         self._order_book_tracker.stop()
         if self._status_polling_task is not None:
             self._status_polling_task.cancel()
@@ -1139,7 +1171,7 @@ cdef class BinanceExchange(ExchangeBase):
             trades = [t for t in trades if t.timestamp > time]
         return trades
 
-    "Under development"
+    #"Under development"
 
     # async def execute_buy(self,
     #                       order_id: str,
@@ -1156,6 +1188,9 @@ cdef class BinanceExchange(ExchangeBase):
     #     safe_ensure_future(self.execute_buy(order_id, trading_pair, amount, order_type, price))
     #     return order_id
 
+    def withdrawal(self, asset: str, address: str, amount: Decimal, address_tag: str) -> int:
+        return self.c_withdrawal(asset, address, amount, address_tag)
+
     async def execute_withdrawal(self, asset: str, address: str, amount: Decimal, address_tag: str):
         withdraw_result = None
         api_params = {
@@ -1165,25 +1200,9 @@ cdef class BinanceExchange(ExchangeBase):
         }
         try:
             withdraw_result = await self.query_api(self._binance_client.withdraw, **api_params)
-            success = str(withdraw_result["success"])
+            success = withdraw_result["success"] == "true"
             if not success:
                 self.logger().info(f"Withdraw attempt failed.")
-
-            # TODO: create event trigger when withdraw appears on the destination exchange
-
-            # event_tag = self.MARKET_BUY_ORDER_CREATED_EVENT_TAG if trade_type is TradeType.BUY \
-            #     else self.MARKET_SELL_ORDER_CREATED_EVENT_TAG
-            # event_class = BuyOrderCreatedEvent if trade_type is TradeType.BUY else SellOrderCreatedEvent
-            # self.c_trigger_event(event_tag,
-            #                      event_class(
-            #                          self._current_timestamp,
-            #                          order_type,
-            #                          trading_pair,
-            #                          amount,
-            #                          price,
-            #                          order_id,
-            #                          exchange_order_id
-            #                      ))
         except asyncio.CancelledError:
             raise
         except Exception as e:
@@ -1195,9 +1214,36 @@ cdef class BinanceExchange(ExchangeBase):
             )
             # TODO
 
-            # self.c_trigger_event(self.MARKET_ORDER_FAILURE_EVENT_TAG,
-            #                      MarketOrderFailureEvent(self._current_timestamp, order_id, order_type))
-
     cdef int c_withdrawal(self, str asset, str address, object amount, str address_tag):
         safe_ensure_future(self.execute_withdrawal(asset, address, amount, address_tag))
         return 1
+
+    def get_deposit_address(self, asset: str) -> Dict[str, str]:
+        return self.c_get_deposit_address(asset)
+
+    cdef dict c_get_deposit_address(self, str asset):
+        return await safe_ensure_future(self.execute_get_deposit_address(asset)).result()
+
+    async def execute_get_deposit_address(self, asset: str):
+        api_params = {"asset" : asset}
+        try:
+            result = await self.query_api(self._binance_client.get_deposit_address, **api_params)
+            success = result["success"] == "true"
+            if not success:
+                self.logger().info("Get deposit address attempt failed.")
+                return None
+            else:
+                return {
+                    "address": result["address"],
+                    "address_tag": result["address_tag"] if "address_tag" in result.keys() else ""
+                }
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            self.logger().network(
+                f"Error submitting withdraw request to Binance for "
+                f"{amount} of {asset}.",
+                exc_info=True,
+                app_warning_msg=str(e)
+            )
+            

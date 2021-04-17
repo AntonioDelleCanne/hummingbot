@@ -19,14 +19,14 @@ from hummingbot.core.data_type.order_book import OrderBook
 from hummingbot.core.network_iterator import NetworkStatus
 from hummingbot.strategy.strategy_base import StrategyBase
 from hummingbot.strategy.market_trading_pair_tuple import MarketTradingPairTuple
-from hummingbot.strategy.arbitrage.arbitrage_market_pair import ArbitrageMarketPair
+from hummingbot.strategy.arbitrage_cross.arbitrage_cross_market_pair import ArbitrageCrossMarketPair
 
 NaN = float("nan")
 s_decimal_0 = Decimal(0)
 as_logger = None
 
 
-cdef class ArbitrageStrategy(StrategyBase):
+cdef class ArbitrageCrossStrategy(StrategyBase):
     OPTION_LOG_STATUS_REPORT = 1 << 0
     OPTION_LOG_CREATE_ORDER = 1 << 1
     OPTION_LOG_ORDER_COMPLETED = 1 << 2
@@ -43,7 +43,7 @@ cdef class ArbitrageStrategy(StrategyBase):
         return as_logger
 
     def __init__(self,
-                 market_pairs: List[ArbitrageMarketPair],
+                 market_pairs: List[ArbitrageCrossMarketPair],
                  min_profitability: Decimal,
                  logging_options: int = OPTION_LOG_ORDER_COMPLETED,
                  status_report_interval: float = 60.0,
@@ -75,6 +75,11 @@ cdef class ArbitrageStrategy(StrategyBase):
         self._failed_order_tolerance = failed_order_tolerance
         self._cool_off_logged = False
         self._current_profitability = ()
+
+        self._withdraw = 0
+        self._withdraw_started_time = -1
+        self._arbitrage_pending = False
+        self._pending_arbitrage_market_pair = None
 
         self._secondary_to_primary_base_conversion_rate = secondary_to_primary_base_conversion_rate
         self._secondary_to_primary_quote_conversion_rate = secondary_to_primary_quote_conversion_rate
@@ -164,6 +169,16 @@ cdef class ArbitrageStrategy(StrategyBase):
         """
         StrategyBase.c_tick(self, timestamp)
 
+        #cdef:
+            #ExchangeBase be = self._market_pairs[0].first.market
+
+        """if self._withdraw == 0:
+            self._withdraw = 1
+            self.logger().info(f"Anto gays")
+            
+            self.logger().info(be.withdrawal("USDT","0x165b9d9e8b96c54099aa8b9e81b4b30760ab7f2e", 50,""))"""
+
+
         cdef:
             int64_t current_tick = <int64_t>(timestamp // self._status_report_interval)
             int64_t last_tick = <int64_t>(self._last_timestamp // self._status_report_interval)
@@ -200,12 +215,23 @@ cdef class ArbitrageStrategy(StrategyBase):
         cdef:
             object buy_order = buy_order_completed_event
             object market_trading_pair_tuple = self._sb_order_tracker.c_get_market_pair_from_order_id(buy_order.order_id)
+            ExchangeBase eb1
+            ExchangeBase eb2
         if market_trading_pair_tuple is not None:
+            eb1 = market_trading_pair_tuple[0]
+            eb2 = market_trading_pair_tuple[1]
             self._last_trade_timestamps[market_trading_pair_tuple] = self._current_timestamp
             if self._logging_options & self.OPTION_LOG_ORDER_COMPLETED:
                 self.log_with_clock(logging.INFO,
                                     f"Limit order completed on {market_trading_pair_tuple[0].name}: {buy_order.order_id}")
                 self.notify_hb_app(f"{buy_order.base_asset_amount:.8f} {buy_order.base_asset}-{buy_order.quote_asset} buy limit order completed on {market_trading_pair_tuple[0].name}")
+            # Developing
+            if self._arbitrage_pending:
+                self.logger().info(f"Depositing from buy market {market_trading_pair_tuple[0].name} to sell market {market_trading_pair_tuple[1].name}")
+                deposit_address = eb2.get_deposit_address(buy_order.base_asset)
+                eb1.withdrawal(buy_order.base_asset, deposit_address["address"], buy_order.base_asset_amount, deposit_address["address_tag"])
+                self._pending_arbitrage_market_pair = market_trading_pair_tuple
+
 
     cdef c_did_complete_sell_order(self, object sell_order_completed_event):
         """
@@ -236,6 +262,37 @@ cdef class ArbitrageStrategy(StrategyBase):
             self.log_with_clock(logging.INFO,
                                 f"Market order canceled on {market_trading_pair_tuple[0].name}: {order_id}")
 
+    # Developing
+
+    cdef c_did_deposit(self, object deposit_event):
+        cdef:
+            long time = deposit_event.time
+            float balance_delta = deposit_event.balance_delta
+            str asset = deposit_event.asset
+            ExchangeBase eb = self._pending_arbitrage_market_pair[1]
+
+        self.logger().info(f"Enter did deposit")
+        if self._withdraw_started_time != -1:
+            deposit_time_passed = time - self._withdraw_started_time
+            self._withdraw_started_time = -1
+            self.logger().info(f"Transaction time passed: {deposit_time_passed}")
+            if self._arbitrage_pending:
+                self.c_sell_with_specific_market(eb, balance_delta,
+                                             order_type=eb.get_taker_order_type(), price=# TODO method that looks at actual price and gets it,
+                                             expiration_seconds=self._next_trade_delay)
+
+    cdef c_did_withdraw(self, object withdraw_event):
+        cdef:
+            long time = withdraw_event.time
+            float balance_delta = withdraw_event.balance_delta
+            str asset = withdraw_event.asset
+
+        self.logger().info(f"Enter did withdraw")
+        self._withdraw_started_time = time
+        self.logger().info(f"Transaction time started: {self._withdraw_started_time}")
+        
+
+
     cdef tuple c_calculate_arbitrage_top_order_profitability(self, object market_pair):
         """
         Calculate the profitability of crossing the exchanges in both directions (buy on exchange 2 + sell
@@ -264,6 +321,7 @@ cdef class ArbitrageStrategy(StrategyBase):
          1. There are outstanding limit taker orders.
          2. We're still within the cool-off period from the last trade, which means the exchange balances may be not
             accurate temporarily.
+         3. There is no arbitrage pending.
 
         If none of the above conditions are matched, then we're ready for new orders.
 
@@ -273,6 +331,10 @@ cdef class ArbitrageStrategy(StrategyBase):
         cdef:
             double time_left
             dict tracked_taker_orders = {**self._sb_order_tracker.c_get_limit_orders(), ** self._sb_order_tracker.c_get_market_orders()}
+
+        # Developing
+        if self._arbitrage_pending:
+            return False
 
         for market_trading_pair_tuple in market_trading_pair_tuples:
             # Do not continue if there are pending limit order
@@ -327,6 +389,10 @@ cdef class ArbitrageStrategy(StrategyBase):
     cdef c_process_market_pair_inner(self, object buy_market_trading_pair_tuple, object sell_market_trading_pair_tuple):
         """
         Executes arbitrage trades for the input market pair.
+        -Asset will be bought on buy_market_trading_pair_tuple.market
+        -Then withdrawal of that asset will happen from buy_market_trading_pair_tuple.market 
+        to sell_market_trading_pair_tuple.market
+        -After capital is received, asset will be sold on sell_market_trading_pair_tuple.market
 
         :type buy_market_trading_pair_tuple: MarketTradingPairTuple
         :type sell_market_trading_pair_tuple: MarketTradingPairTuple
@@ -360,11 +426,15 @@ cdef class ArbitrageStrategy(StrategyBase):
             buy_order_type = buy_market_trading_pair_tuple.market.get_taker_order_type()
             sell_order_type = sell_market_trading_pair_tuple.market.get_taker_order_type()
 
+            # Developing
+            self._arbitrage_pending = True
+
             # Set limit order expiration_seconds to _next_trade_delay for connectors that require order expiration for limit orders
             self.c_buy_with_specific_market(buy_market_trading_pair_tuple, quantized_order_amount,
                                             order_type=buy_order_type, price=buy_price, expiration_seconds=self._next_trade_delay)
-            self.c_sell_with_specific_market(sell_market_trading_pair_tuple, quantized_order_amount,
-                                             order_type=sell_order_type, price=sell_price, expiration_seconds=self._next_trade_delay)
+
+            #self.c_sell_with_specific_market(sell_market_trading_pair_tuple, quantized_order_amount,
+                                             #order_type=sell_order_type, price=sell_price, expiration_seconds=self._next_trade_delay)
             self.logger().info(self.format_status())
 
     @staticmethod
@@ -613,3 +683,15 @@ cdef list c_find_profitable_arbitrage_orders(object min_profitability,
         pass
 
     return profitable_orders
+
+    # TODO : Implementare task che controlla differenza prezzi e notifica quando th
+
+
+
+    # TODO : Implementare task che compra e avvia ritiro quando comprato (su exchange A)
+
+
+
+    # TODO : Implementare task che guarda balance e appena riceve soldi (balance > 0) compra (su exchange B)
+
+    

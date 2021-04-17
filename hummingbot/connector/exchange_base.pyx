@@ -306,3 +306,13 @@ cdef class ExchangeBase(ConnectorBase):
 
     cdef int c_withdrawal(self, str asset, str address, object amount, str address_tag):
         return self.withdrawal(asset, address ,amount, address_tag)
+
+    def get_deposit_address(self, asset: str) -> Dict[str, str]:
+        """
+        Returns the deposit address.
+        """
+        raise NotImplementedError
+
+    cdef dict c_get_deposit_address(self, str asset):
+        return self.get_deposit_address(asset)
+        

@@ -34,6 +34,9 @@ class MarketEvent(Enum):
     TransactionFailure = 199
     BuyOrderCreated = 200
     SellOrderCreated = 201
+    # Developing
+    Withdraw = 202
+    Deposit = 203
 
 
 class NewBlocksWatcherEvent(Enum):
@@ -356,3 +359,9 @@ class SellOrderCreatedEvent:
     exchange_order_id: Optional[str] = None
     leverage: Optional[int] = 1
     position: Optional[str] = "NILL"
+
+@dataclass
+class TransferEvent:
+    time: int
+    asset: str
+    balance_delta: float

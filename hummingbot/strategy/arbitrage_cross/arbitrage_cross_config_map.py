@@ -13,24 +13,24 @@ from typing import Optional
 
 
 def validate_primary_market_trading_pair(value: str) -> Optional[str]:
-    primary_market = arbitrage_config_map.get("primary_market").value
+    primary_market = arbitrage_cross_config_map.get("primary_market").value
     return validate_market_trading_pair(primary_market, value)
 
 
 def validate_secondary_market_trading_pair(value: str) -> Optional[str]:
-    secondary_market = arbitrage_config_map.get("secondary_market").value
+    secondary_market = arbitrage_cross_config_map.get("secondary_market").value
     return validate_market_trading_pair(secondary_market, value)
 
 
 def primary_trading_pair_prompt():
-    primary_market = arbitrage_config_map.get("primary_market").value
+    primary_market = arbitrage_cross_config_map.get("primary_market").value
     example = EXAMPLE_PAIRS.get(primary_market)
     return "Enter the token trading pair you would like to trade on %s%s >>> " \
            % (primary_market, f" (e.g. {example})" if example else "")
 
 
 def secondary_trading_pair_prompt():
-    secondary_market = arbitrage_config_map.get("secondary_market").value
+    secondary_market = arbitrage_cross_config_map.get("secondary_market").value
     example = EXAMPLE_PAIRS.get(secondary_market)
     return "Enter the token trading pair you would like to trade on %s%s >>> " \
            % (secondary_market, f" (e.g. {example})" if example else "")
@@ -40,11 +40,11 @@ def secondary_market_on_validated(value: str):
     required_exchanges.append(value)
 
 
-arbitrage_config_map = {
+arbitrage_cross_config_map = {
     "strategy":
         ConfigVar(key="strategy",
                   prompt="",
-                  default="arbitrage_cross"),
+                  default="arbitrage"),
     "primary_market": ConfigVar(
         key="primary_market",
         prompt="Enter your primary exchange name >>> ",
